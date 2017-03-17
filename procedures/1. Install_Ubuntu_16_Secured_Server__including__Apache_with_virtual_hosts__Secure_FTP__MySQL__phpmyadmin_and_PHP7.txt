@@ -1,0 +1,350 @@
+//////////////////////////////////////////////////////////////////////////////////
+///                  Install Ubuntu 16 Secured Server       
+/// Including: Apache with virtual hosts, Secure FTP, MySQL, phpmyadmin and PHP7
+//////////////////////////////////////////////////////////////////////////////////
+
+/// There are many components that need to be configured, these are instructions for a secure Apache virtual hosts configuration, custom servers may need additional fine tuning.
+
+* update system
+sudo apt update && apt upgrade -y && apt dist-upgrade -y
+
+### INSTALL APACHE (web server)
+
+sudo apt-get install apache2 apache2-utils
+
+/// only for WP
+
+sudo cp /etc/apache2/apache2.conf ~
+
+sudo nano /etc/apache2/apache2.conf
+
+# Once in nano, scroll to the end of the file, switch to Insert mode,
+ and add the following line (note that there is a space between the final
+ “p” of “php” and the period before “html”):
+
+AddType application/x-httpd-php .html
+
+sudo /etc/init.d/apache2 restart
+
+/// END Only for WP
+
+### INSTALL PHP AND NEEDED PHP LIBRARIES
+
+sudo apt-get install php libapache2-mod-php php7.0-mcrypt php7.0-mysql php7.0-gd php7.0-json php7.0-cgi  php7.0
+
+* if wanting to search for all available php libraries
+apt-cache search php- | less
+
+* then install them
+
+** there is a special PHP 7 library for all major development packages
+** if wanting to add it
+sudo apt-get install php-all-dev
+
+# MODIFY PHP.INI
+(in nano its Ctrl+_ to search)
+
+sudo nano /etc/php/7.0/apache2/php.ini
+
+upload_max_filesize = 256M
+max_execution_time = 120
+memory_limit = 256M
+post_max_size = 256M
+cgi.force_redirect = 1
+cgi.fix_pathinfo = 1
+fastcgi.impersonate = 0
+fastcgi.logging = 0
+file_uploads = On
+
+(php.ini may require many other fine tuning to ensure that all apps have the correct settings and libraries)
+
+### INSTALL MYSQL SERVER
+
+sudo apt-get install mysql-client mysql-server 
+
+** open mysql for external access, i.e. HeidiSQL, etc
+sudo nano /etc/mysql/mysqld.conf/mysqld.cnf
+
+bind-address            = 127.0.0.1
+
+* change to
+
+bind-address            = 0.0.0.0
+
+Ctlr+x,exit and save.
+
+sudo service mysql restart
+
+* test with Heidi for mysql server access
+
+### INSTALL PHPMYADMIN
+
+sudo apt-get install phpmyadmin
+
+sudo a2enconf phpmyadmin
+
+sudo service apache2 restart && sudo service apache2 reload && sudo service apache2 restart
+
+sudo nano /etc/apache2/apache2.conf
+*** add to last line
+Include /etc/phpmyadmin/apache.conf
+
+* open browser and point it to phpmyadmin in a selected domain
+http://test.domain.com/phpmyadmin
+* login as root with previous password
+
+In phpmyadmin create user and give him all the permissions, as with "trek_user"
+
+*** Only do this after adding the new user, i.e. "trek_user"
+*** The root user is disallowed with the secured mysql installation
+sudo mysql_secure_installation
+
+* remove root and anonymous access (Y)
+* reload (Y)
+
+(In the future you access the mysql server with this new account "trek_user")
+
+// test php
+
+sudo nano /var/www/html/phpinfo.php
+*** add
+<?php
+phpinfo();
+?>
+
+** test it on a browser to verify good php
+http://test.domain.com/phpinfo.php
+
+### SETUP APACHE and virtual hosts
+(using example.com, change to the correct name for the domain for which you are creating a virtual host for)
+
+(repeat for multiple virtual hosts needed)
+
+sudo mkdir -p /var/www/example.com/public_html
+
+sudo chown -R $USER:$USER /var/www/example.com/public_html
+
+sudo chmod -R 755 /var/www
+
+sudo cp /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/example.com.conf
+
+sudo nano /etc/apache2/sites-available/example.com.conf
+
+** change
+
+ServerAdmin admin@example.com
+ServerName example.com
+ServerAlias www.example.com
+DocumentRoot /var/www/example.com/public_html
+
+* Ctrl+x, save and exit.
+
+sudo a2ensite example.com.conf
+
+* disable the default config (safer)
+sudo a2dissite 000-default.conf
+
+**** repeat above process for additional virtual hosts needed.
+
+sudo systemctl restart apache2
+
+### modify hosts and hostname
+
+sudo nano /etc/hosts
+
+* add the IP and the AWS machine name
+52.22.33.44    	ec2-52-22-33-44.us-west-2.compute.amazonaws.com
+52.22.33.44		example.com
+52.22.33.44		test2.other.com # (as another example)
+
+sudo nano /etc/hostname
+* add the AWS machine name
+ec2-52-22-33-44.us-west-2.compute.amazonaws.com
+
+## modify default file
+sudo nano /etc/apache2/mods-enabled/dir.conf
+
+<IfModule mod_dir.c>
+    DirectoryIndex index.htm index.php index.html index.cgi index.pl index.xhtml
+</IfModule>
+
+(remove additional entries if not needed, i.e. index.pl, index.xhtml)
+
+nano /etc/apache2/apache2.conf
+
+* change accordingly
+
+<Directory /var/www/>
+        Options Indexes FollowSymLinks
+        DirectoryIndex  index.htm index.php
+        AllowOverride All
+        Require all granted
+</Directory>
+
+* Ctrl+x, save and exit
+
+sudo systemctl restart apache2
+
+* verify apache2 styatus
+sudo systemctl status apache2
+
+apache2ctl -S
+/usr/sbin/apache2 -V
+
+* check there are errors reported, if any issues are found, fix and restart apache.
+
+### Secure FTP - ProFTPd with TLS support
+
+sudo -s
+
+apt-get -y install proftpd openssl
+
+* you will be asked a question, select "stantalone"
+
+nano /etc/proftpd/proftpd.conf
+
+* add/modify
+IdentLookups off
+DefaultRoot ~
+ServerIdent on "FTP Server ready."
+UseReverseDNS   off
+# This is used for FTPS connections
+# uncomment the entry
+Include /etc/proftpd/tls.conf
+
+(without these entries above it wont work)
+
+* Ctrl+x, save and exit
+
+mkdir /etc/proftpd/ssl
+
+openssl req -new -x509 -days 365 -nodes -out /etc/proftpd/ssl/proftpd.cert.pem -keyout /etc/proftpd/ssl/proftpd.key.pem
+
+* answer the questions
+
+chmod 600 /etc/proftpd/ssl/proftpd.*
+
+sudo nano /etc/proftpd/tls.conf
+
+* when using the certificate issued above
+
+<IfModule mod_tls.c>
+TLSEngine                  on
+TLSLog                     /var/log/proftpd/tls.log
+TLSProtocol TLSv1.2
+TLSCipherSuite AES128+EECDH:AES128+EDH
+TLSOptions                 NoCertRequest AllowClientRenegotiations
+TLSRSACertificateFile      /etc/proftpd/ssl/proftpd.cert.pem
+TLSRSACertificateKeyFile   /etc/proftpd/ssl/proftpd.key.pem
+TLSVerifyClient            off
+TLSRequired                on
+RequireValidShell          no
+</IfModule>
+
+** if wanting to use letsencrypt (how-to letsencrypt lower down in this document)
+
+TLSEngine                    on
+TLSLog                       /var/log/proftpd/tls.log
+TLSProtocol                  TLSv1.2
+TLSRSACertificateFile        /etc/letsencrypt/live/example.com/cert.pem
+TLSRSACertificateKeyFile     /etc/letsencrypt/live/example.com/privkey.pem
+TLSCertificateChainFile      /etc/letsencrypt/live/example.com/chain.pem
+TLSRequired                  on
+TLSRenegotiate               none
+
+* Add FTP user that can access all virtual hosts
+
+useradd --shell /bin/bash ftpuser
+
+passwd ftpuser
+(enter new password)
+
+sudo chown ftpuser:ftpuser /var/www/
+
+sudo nano /etc/passwd
+(look below for the "ftpuser" login details, if must point to /var/www and bin/bash for the user to be able to login via FTP and see the content)
+
+example:
+ftpuser:x:1001:1001::/var/www:/bin/bash
+
+sudo chown -R $USER:$USER /var/www && sudo service proftpd restart
+
+### Install letsencrypt with 90 day certificates
+
+sudo apt-get install python-letsencrypt-apache
+
+* to create new certificate for selected domain(s)
+sudo letsencrypt --apache -d example.com -d test2.other.com
+
+* to renew
+sudo letsencrypt renew
+
+(a message will ask if you want http, https or both. Select "both" to ensure you have all the levels of access available, https redirecting is shared below on this document)
+
+**** create a cronjob to renew certificates by itself
+
+sudo crontab -e
+
+You may be prompted to select an editor:
+
+Output
+no crontab for root - using an empty one
+
+Select an editor.  To change later, run 'select-editor'.
+  1. /bin/ed
+  2. /bin/nano        <---- easiest
+  3. /usr/bin/vim.basic
+  4. /usr/bin/vim.tiny
+
+Choose 1-4 [2]: 2
+
+* Include the following content at the end of the crontab, all in one line:
+
+30 2 * * 1 /usr/bin/letsencrypt renew >> /var/log/le-renew.log
+
+Ctrl+x, save and exit.
+
+(it will renew all certificates every 15 days)
+
+* monitor the renew log for letsencrypt to check your certificates were correctly issues and are operational
+
+nano /var/log/le-renew.log
+
+(if issues are found fix asap, else your https redirect will lead to broken pages and domain)
+
+### Setting permissions for directories where you need to be able to have full access for things like uploads
+
+* Earlier on we set the permissions as follows:
+sudo chmod -R 755 /var/www
+
+* change permissions as needed , i.e.
+sudo chmod -R 777 /var/www/example.com/public_html/uploads
+OR
+sudo chmod -R 777 /var/www/example.com/public_html/Files
+OR
+whatever path that you need to be writable.
+
+### if wanting to force SSL on web browsing for virtual hosts
+
+cd /etc/apache2/sites-available
+
+* edit the selected conf file for the selected domain, i.e. example.com.conf
+
+* add under "ServerName"
+RedirectMatch 301 (.*) https://example.com$1
+(replace with the correct domain)
+
+* edit all conf files as needed
+
+(if needing to remove 301 redirect, edit file and add #, else delete line)
+# RedirectMatch 301 (.*) https://example.com$1
+(remember to do a "sudo service apache2 reload && sudo service apache2 restart" to activate new Apache configs)
+
+* reload and afterwards restart apache
+sudo service apache2 reload && sudo service apache2 restart
+
+/// Thats it, your server should be operational
+
+///////////////////////////////////////////////////
+///////   END ////////////////
+//////////////////////////////////////////////////
